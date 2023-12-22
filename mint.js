@@ -15,23 +15,27 @@ var inscription_hex;
 var gasPriceMax;
 var extraGas;
 var estimateGasLimit;
+var txGasLimit;
 async function init(rpc, accountIndex, _loop, inscription, _gasPriceMax, _extraGas) {
     console.log("===== init =====");
-    console.log("=== rpc : ", rpc);
+    console.log("=== rpc节点 : ", rpc);
     provider = new ethers.providers.JsonRpcProvider(rpc);
     const network = await provider.getNetwork();
     chainId = await network.chainId;
     console.log("=== chainId : ", chainId);
+    var blockGasPriceInWei = await provider.getGasPrice();
+    console.log("=== 当前区块gas价格 (Wei) : ", ethers.utils.formatEther(blockGasPriceInWei));
+    console.log("=== 当前区块gas价格 (GWei) : ", ethers.utils.formatUnits(blockGasPriceInWei, 9));
 
     inscription_hex = await ethers.utils.hexlify(ethers.utils.toUtf8Bytes(inscription));
-    console.log("=== inscription_str : ", inscription);
-    console.log("=== inscription_hex : ", inscription_hex);
+    console.log("=== 铭文字符串 : ", inscription);
+    console.log("=== 铭文字符串(hex) : ", inscription_hex);
 
     const mnemonic = fs.readFileSync("./mnemonic.secret", "utf8");
     let path = "m/44'/60'/0'/0/" + accountIndex;
     // var wallet = new ethers.Wallet(pvk, provider);
     wallet = ethers.Wallet.fromMnemonic(mnemonic, path);
-    console.log("=== wallet : ", wallet.address);
+    console.log("=== mint钱包 : ", wallet.address);
     wallet = wallet.connect(provider);
 
     estimateGasLimit = await provider.estimateGas({
@@ -39,21 +43,24 @@ async function init(rpc, accountIndex, _loop, inscription, _gasPriceMax, _extraG
         data: inscription_hex,
     });
     // console.log("estimateGasLimit : ", estimateGasLimit);
-    var txGasLimit = parseInt(estimateGasLimit, 10);
-    console.log("=== tx txGasLimit ： ", txGasLimit);
+    txGasLimit = parseInt(estimateGasLimit, 10);
+    console.log("=== 单次mint预估gasLimit ： ", txGasLimit);
 
-    console.log("=== loop : ", _loop);
+    console.log("=== 循环次数 : ", _loop);
     loop = _loop;
 
     var gasBalance = await wallet.getBalance();
     var gasBalanceFormat = await ethers.utils.formatEther(gasBalance);
-    console.log("=== gasBalanceFormat : ", gasBalanceFormat);
+    console.log("=== 主网币gas余额 : ", gasBalanceFormat);
 
-    console.log("=== gasPriceMax(Gwei) : ", _gasPriceMax);
+    console.log("=== 设定最高gas(Gwei) : ", _gasPriceMax);
     gasPriceMax = _gasPriceMax;
 
-    console.log("=== extraGas(Gwei) : ", _extraGas);
+    console.log("=== 设定额外gas(Gwei) : ", _extraGas);
     extraGas = _extraGas;
+
+    const totalGas = blockGasPriceInWei.add(_extraGas).mul(estimateGasLimit).mul(loop);
+    console.log("=== 本次批量铭刻预估总gas (eth) : ", ethers.utils.formatEther(totalGas));
 }
 
 async function mint() {
@@ -61,7 +68,7 @@ async function mint() {
     var blockGasPriceInWei = await provider.getGasPrice();
     // console.log("blockGasPriceInWei : ", blockGasPriceInWei);
     var blockGasPriceInGwei = ethers.utils.formatUnits(blockGasPriceInWei, 9);
-    console.log("=== blockGasPriceInGwei : ", blockGasPriceInGwei);
+    console.log("=== 当前区块gas价格（Wei） : ", blockGasPriceInGwei);
 
     var nonce;
     var tx;
@@ -79,12 +86,11 @@ async function mint() {
             while (nonce == 0) {
                 console.log(`=== 获取到无效的nonce：${nonce}...重新获取中...`);
                 nonce = await wallet.getTransactionCount();
-                await wait(1000);
+                await wait(500);
             }
 
         console.log("=== nonce : ", nonce);
 
-        // solidGas = document.getElementById("input_solid_gas").value;
         // extraGas = document.getElementById("input_extra_gas").value;
         // if (solidGas > 0) {
         //     blockGasPriceInWei = ethers.utils.parseEther(ethers.utils.formatUnits(solidGas, 9));
@@ -123,7 +129,7 @@ async function mint() {
         };
         signedTx = await wallet.signTransaction(tx);
 
-        console.log(`===>>> 交易_${i + 1}_正在发送 <<<===`);
+        console.log(`===>>> 交易_【${i + 1}】_正在发送 <<<===`);
         try {
             rc = await provider.sendTransaction(signedTx);
         } catch (error) {
@@ -134,9 +140,8 @@ async function mint() {
         }
 
         await rc.wait();
-        console.log(`===>>> 交易_${i + 1}_已上链确认：`, rc);
+        console.log(`===>>> 交易_【${i + 1}】_已上链确认：`, rc);
         successCount++;
-        await wait(2000);
     }
 
     console.log(`===>>> 本次执行已完成，成功【${successCount}】笔，失败【${failCount}】笔，请去区块浏览器确认！`);
@@ -164,17 +169,17 @@ async function main() {
 
     const rpc = "https://rpc.ankr.com/klaytn";
     const accountIndex = 0;
-    const loop = 2;
+    const loop = 10;
     const inscription = 'data:,{"p":"fair-20","op":"mint","tick":"fair","amt":"1000"}';
     const gasPriceMax = 100; //Gwei
-    const extraGas = 10; //Gwei
+    const extraGas = 0; //Gwei
+
+    //初始化
     await init(rpc, accountIndex, loop, inscription, gasPriceMax, extraGas);
 
-    // 不换行输出
-    // 监听键入回车事件
     var yOrN = await askQuestion("是否要开始mint? y/n : ");
     console.log("=== yOrN : ", yOrN);
-
+    //开始自动铭刻
     if (yOrN == "y") await mint();
     else {
         console.log("取消执行，程序结束。");
